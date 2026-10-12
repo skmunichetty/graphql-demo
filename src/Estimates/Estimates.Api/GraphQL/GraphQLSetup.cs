@@ -17,11 +17,19 @@ public static class GraphQLSetup
             .AddGraphQLServerDefaults(settings)
             .AddQueryType<Query>()
             .AddMutationType<Mutation>()
+            .AddSubscriptionType<Subscription>()
             .AddType<EstimateType>()
             .AddType<CustomerType>()
             .AddType<LineItemType>()
             .AddType<EstimateStatusType>()
-            .AddErrorInterfaceType<IUserError>();
+            .AddType<EstimateChangeType>()
+            .AddType<EstimateChangeKindType>()
+            .AddErrorInterfaceType<IUserError>()
+
+            // In-process pub/sub: events reach subscribers connected to the same instance only.
+            // With several replicas, switch to a shared provider (Redis or PostgreSQL).
+            .AddInMemorySubscriptions()
+            .AddSocketSessionInterceptor<WebSocketAuthenticationInterceptor>();
 
         return services;
     }

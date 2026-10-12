@@ -1,6 +1,7 @@
 schema {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 
 type Query {
@@ -57,6 +58,12 @@ type Mutation {
     @cost(weight: "10")
 }
 
+type Subscription {
+  "Changes to estimates in your tenant, as they are saved. Pass estimateId to follow one estimate."
+  estimateChanged("Only report changes to this estimate." estimateId: UUID): EstimateChange!
+    @authorize(policy: "estimates.read")
+}
+
 type AddLineItemPayload {
   estimate: Estimate
   errors: [AddLineItemError!]
@@ -111,6 +118,13 @@ type Estimate {
   approvedAt: DateTime
   "Line items in display order."
   lineItems: [LineItem!]! @cost(weight: "10")
+}
+
+"A saved change to an estimate."
+type EstimateChange {
+  kind: EstimateChangeKind!
+  "The estimate after the change."
+  estimate: Estimate!
 }
 
 type EstimateNotFoundError implements UserError {
@@ -275,6 +289,15 @@ enum ApplyPolicy {
   AFTER_RESOLVER
   "The policy is applied in the validation step before the execution."
   VALIDATION
+}
+
+"What changed. More values may be added: clients should handle unknown values."
+enum EstimateChangeKind {
+  CREATED
+  LINE_ITEM_ADDED
+  LINE_ITEM_UPDATED
+  LINE_ITEM_REMOVED
+  APPROVED
 }
 
 "Estimate lifecycle. More values may be added: clients should handle unknown values."
