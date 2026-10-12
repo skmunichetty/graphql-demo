@@ -1,0 +1,334 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+type Query {
+  "Returns the estimate, or null if it does not exist in your tenant."
+  estimate(id: UUID!): Estimate
+    @authorize(policy: "estimates.read")
+    @cost(weight: "10")
+  "Estimates in your tenant, newest first. Cursor-paginated: at most 50 per page, 20 by default."
+  estimates(
+    "Returns the first _n_ elements from the list."
+    first: Int
+    "Returns the elements in the list that come after the specified cursor."
+    after: String
+    "Returns the last _n_ elements from the list."
+    last: Int
+    "Returns the elements in the list that come before the specified cursor."
+    before: String
+  ): EstimatesConnection
+    @authorize(policy: "estimates.read")
+    @listSize(
+      assumedSize: 50
+      slicingArguments: ["first", "last"]
+      slicingArgumentDefaultValue: 20
+      sizedFields: ["edges", "nodes"]
+      requireOneSlicingArgument: false
+    )
+    @cost(weight: "10")
+  "Service-to-service only (scope estimates:integration.read). Returns the estimate for the named tenant, or null."
+  estimateForIntegration(tenantId: String!, id: UUID!): Estimate
+    @authorize(policy: "estimates.integration.read")
+    @cost(weight: "10")
+}
+
+type Mutation {
+  "Creates a draft estimate in your tenant."
+  createEstimate(input: CreateEstimateInput!): CreateEstimatePayload!
+    @authorize(policy: "estimates.write")
+    @cost(weight: "10")
+  "Adds a line item to a draft estimate."
+  addLineItem(input: AddLineItemInput!): AddLineItemPayload!
+    @authorize(policy: "estimates.write")
+    @cost(weight: "10")
+  "Replaces the details of a line item on a draft estimate."
+  updateLineItem(input: UpdateLineItemInput!): UpdateLineItemPayload!
+    @authorize(policy: "estimates.write")
+    @cost(weight: "10")
+  "Removes a line item from a draft estimate."
+  removeLineItem(input: RemoveLineItemInput!): RemoveLineItemPayload!
+    @authorize(policy: "estimates.write")
+    @cost(weight: "10")
+  "Approves a draft estimate. Approved estimates cannot be changed."
+  approveEstimate(input: ApproveEstimateInput!): ApproveEstimatePayload!
+    @authorize(policy: "estimates.write")
+    @cost(weight: "10")
+}
+
+type AddLineItemPayload {
+  estimate: Estimate
+  errors: [AddLineItemError!]
+}
+
+type ApproveEstimatePayload {
+  estimate: Estimate
+  errors: [ApproveEstimateError!]
+}
+
+"The estimate changed since you read it. Re-query it and retry with the current version."
+type ConcurrencyConflictError implements UserError {
+  message: String!
+  code: String!
+  estimateId: UUID!
+  expectedVersion: Int!
+  "The stored version, when known."
+  currentVersion: Int
+}
+
+type CreateEstimatePayload {
+  estimate: Estimate
+  errors: [CreateEstimateError!]
+}
+
+"Customer details captured on the estimate."
+type Customer {
+  name: String!
+  email: String
+  phone: String
+}
+
+"A priced construction estimate for one customer, in one currency."
+type Estimate {
+  "Unique estimate identifier."
+  id: UUID!
+  customer: Customer!
+  "ISO 4217 currency code. All amounts on the estimate use this currency."
+  currencyCode: String!
+  status: EstimateStatus!
+  "Sum of line subtotals, before tax."
+  subtotal: Decimal!
+  "Sum of rounded line tax amounts."
+  taxTotal: Decimal!
+  "Subtotal plus tax total."
+  total: Decimal!
+  "Optimistic concurrency version. Pass it as `expectedVersion` when changing the estimate."
+  version: Int!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  "When the estimate was approved; null while it is a draft."
+  approvedAt: DateTime
+  "Line items in display order."
+  lineItems: [LineItem!]! @cost(weight: "10")
+}
+
+type EstimateNotFoundError implements UserError {
+  message: String!
+  code: String!
+  estimateId: UUID!
+}
+
+"A connection to a list of items."
+type EstimatesConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [EstimatesEdge!]
+  "A flattened list of the nodes."
+  nodes: [Estimate!]
+}
+
+"An edge in a connection."
+type EstimatesEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: Estimate!
+}
+
+"The estimate's status does not allow this operation. Codes: ESTIMATE_NOT_EDITABLE, ESTIMATE_HAS_NO_LINE_ITEMS."
+type InvalidEstimateStateError implements UserError {
+  message: String!
+  code: String!
+}
+
+type LineItem {
+  id: UUID!
+  "Display order, starting at 1."
+  position: Int!
+  description: String!
+  quantity: Decimal!
+  unitPrice: Decimal!
+  "Demo tax rate, for example 10 means 10%."
+  taxRatePercent: Decimal!
+  "Quantity x unit price, rounded to 2 decimal places."
+  subtotal: Decimal!
+  "Subtotal x tax rate, rounded to 2 decimal places."
+  taxAmount: Decimal!
+  total: Decimal!
+}
+
+type LineItemNotFoundError implements UserError {
+  message: String!
+  code: String!
+  lineItemId: UUID!
+}
+
+"Information about pagination in a connection."
+type PageInfo {
+  "Indicates whether more edges exist following the set defined by the clients arguments."
+  hasNextPage: Boolean!
+  "Indicates whether more edges exist prior the set defined by the clients arguments."
+  hasPreviousPage: Boolean!
+  "When paginating backwards, the cursor to continue."
+  startCursor: String
+  "When paginating forwards, the cursor to continue."
+  endCursor: String
+}
+
+type RemoveLineItemPayload {
+  estimate: Estimate
+  errors: [RemoveLineItemError!]
+}
+
+type UpdateLineItemPayload {
+  estimate: Estimate
+  errors: [UpdateLineItemError!]
+}
+
+type ValidationError implements UserError {
+  message: String!
+  code: String!
+  "The input field that failed validation."
+  field: String!
+}
+
+"A business rule or validation failure the client can act on."
+interface UserError {
+  "Human-readable description. Do not parse it; it may change."
+  message: String!
+  "Stable machine-readable error code, for example VALIDATION_FAILED."
+  code: String!
+}
+
+union AddLineItemError =
+  | ValidationError
+  | EstimateNotFoundError
+  | InvalidEstimateStateError
+  | ConcurrencyConflictError
+
+union ApproveEstimateError =
+  | EstimateNotFoundError
+  | InvalidEstimateStateError
+  | ConcurrencyConflictError
+
+union CreateEstimateError = ValidationError
+
+union RemoveLineItemError =
+  | EstimateNotFoundError
+  | LineItemNotFoundError
+  | InvalidEstimateStateError
+  | ConcurrencyConflictError
+
+union UpdateLineItemError =
+  | ValidationError
+  | EstimateNotFoundError
+  | LineItemNotFoundError
+  | InvalidEstimateStateError
+  | ConcurrencyConflictError
+
+input AddLineItemInput {
+  estimateId: UUID!
+  expectedVersion: Int!
+  description: String!
+  quantity: Decimal!
+  unitPrice: Decimal!
+  "Percent, for example 10 for 10%. Omit to use the server's demo default."
+  taxRatePercent: Decimal
+}
+
+input ApproveEstimateInput {
+  estimateId: UUID!
+  expectedVersion: Int!
+}
+
+input CreateEstimateInput {
+  customerName: String!
+  customerEmail: String
+  customerPhone: String
+  "ISO 4217 code: AUD, CAD, EUR, GBP, NZD or USD."
+  currencyCode: String!
+}
+
+input RemoveLineItemInput {
+  estimateId: UUID!
+  lineItemId: UUID!
+  expectedVersion: Int!
+}
+
+input UpdateLineItemInput {
+  estimateId: UUID!
+  lineItemId: UUID!
+  expectedVersion: Int!
+  description: String!
+  quantity: Decimal!
+  unitPrice: Decimal!
+  taxRatePercent: Decimal!
+}
+
+"Defines when a policy shall be executed."
+enum ApplyPolicy {
+  "Before the resolver was executed."
+  BEFORE_RESOLVER
+  "After the resolver was executed."
+  AFTER_RESOLVER
+  "The policy is applied in the validation step before the execution."
+  VALIDATION
+}
+
+"Estimate lifecycle. More values may be added: clients should handle unknown values."
+enum EstimateStatus {
+  "Editable."
+  DRAFT
+  "Locked. Can be exported to accounting."
+  APPROVED
+}
+
+"The `DateTime` scalar type represents a date and time with time zone offset information."
+scalar DateTime
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/date-time.html")
+
+"The `Decimal` scalar type represents a decimal floating-point number with high precision."
+scalar Decimal
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/decimal.html")
+
+"The `UUID` scalar type represents a Universally Unique Identifier (UUID) as defined by RFC 9562."
+scalar UUID
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/uuid.html")
+
+"The authorize directive."
+directive @authorize(
+  "The name of the authorization policy that determines access to the annotated resource."
+  policy: String
+  "Roles that are allowed to access the annotated resource."
+  roles: [String!]
+  "Defines when the authorize directive shall be applied. By default the authorize directive is applied before the resolver is executed."
+  apply: ApplyPolicy! = BEFORE_RESOLVER
+) repeatable on OBJECT | FIELD_DEFINITION
+
+"The purpose of the `cost` directive is to define a `weight` for GraphQL types, fields, and arguments. Static analysis can use these weights when calculating the overall cost of a query or response."
+directive @cost(
+  "The `weight` argument defines what value to add to the overall cost for every appearance, or possible appearance, of a type, field, argument, etc."
+  weight: String!
+) on
+  | SCALAR
+  | OBJECT
+  | FIELD_DEFINITION
+  | ARGUMENT_DEFINITION
+  | ENUM
+  | INPUT_FIELD_DEFINITION
+
+"The purpose of the `@listSize` directive is to either inform the static analysis about the size of returned lists (if that information is statically available), or to point the analysis to where to find that information."
+directive @listSize(
+  "The `assumedSize` argument can be used to statically define the maximum length of a list returned by a field."
+  assumedSize: Int
+  "The `slicingArguments` argument can be used to define which of the field's arguments with numeric type are slicing arguments, so that their value determines the size of the list returned by that field. It may specify a list of multiple slicing arguments."
+  slicingArguments: [String!]
+  "The `slicingArgumentDefaultValue` argument can be used to define a default value for a slicing argument, which is used if the argument is not present in a query."
+  slicingArgumentDefaultValue: Int
+  "The `sizedFields` argument can be used to define that the value of the `assumedSize` argument or of a slicing argument does not affect the size of a list returned by a field itself, but that of a list returned by one of its sub-fields."
+  sizedFields: [String!]
+  "The `requireOneSlicingArgument` argument can be used to inform the static analysis that it should expect that exactly one of the defined slicing arguments is present in a query. If that is not the case (i.e., if none or multiple slicing arguments are present), the static analysis may throw an error."
+  requireOneSlicingArgument: Boolean = true
+) on FIELD_DEFINITION

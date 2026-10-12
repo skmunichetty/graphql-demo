@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Accounting.Application\Accounting.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="GreenDonut.Data.EntityFramework" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The GraphQL operation sent to the Estimates service; also used by its consumer contract test. -->
+    <EmbeddedResource Include="EstimatesService\EstimateForExport.graphql" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Accounting.UnitTests" />
+  </ItemGroup>
+</Project>

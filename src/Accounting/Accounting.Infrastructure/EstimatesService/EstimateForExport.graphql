@@ -1,0 +1,28 @@
+# The only operation the Accounting service sends to the Estimates service.
+#
+# CONSUMER CONTRACT: this file is embedded in the Accounting client AND executed by the Estimates
+# service's test suite (tests/Estimates.IntegrationTests/ConsumerContractTests.cs). If the Estimates
+# schema stops supporting any field below, the Estimates build fails before the change is deployed.
+query EstimateForExport($tenantId: String!, $id: UUID!) {
+  estimateForIntegration(tenantId: $tenantId, id: $id) {
+    id
+    status
+    currencyCode
+    subtotal
+    taxTotal
+    total
+    customer {
+      name
+      email
+    }
+    lineItems {
+      description
+      quantity
+      unitPrice
+      taxRatePercent
+      subtotal
+      taxAmount
+      total
+    }
+  }
+}

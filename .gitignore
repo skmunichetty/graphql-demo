@@ -1,0 +1,19 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+TestResults/
+*.trx
+coverage*/
+
+## Secrets and local environment: never commit these.
+.env
+*.pfx
+*.pem
+*.key
+secrets*.json
+appsettings.*.local.json

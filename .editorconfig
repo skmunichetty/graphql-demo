@@ -1,0 +1,54 @@
+root = true
+
+[*]
+indent_style = space
+insert_final_newline = true
+charset = utf-8
+
+[*.{json,yml,yaml,props,csproj,slnx,xml}]
+indent_size = 2
+
+[*.cs]
+indent_size = 4
+
+# Coding standard: always use braces, even for single-line bodies. Enforced at build time.
+csharp_prefer_braces = true:error
+dotnet_diagnostic.IDE0011.severity = error
+
+# Prefer ordinary method bodies over expression-bodied members for methods and constructors.
+csharp_style_expression_bodied_methods = false:suggestion
+csharp_style_expression_bodied_constructors = false:suggestion
+csharp_style_expression_bodied_properties = true:silent
+
+# Explicit, readable code.
+csharp_style_var_when_type_is_apparent = true:silent
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_style_qualification_for_field = false:silent
+dotnet_diagnostic.IDE0161.severity = warning
+
+# Unused usings are noise.
+dotnet_diagnostic.IDE0005.severity = warning
+
+# Async naming and cancellation propagation.
+dotnet_diagnostic.CA2016.severity = warning
+
+# These analyzers conflict with deliberate choices in this code base:
+# - CA1707: test method names use underscores for readability.
+# - CA1848/CA1873: LoggerMessage source generation is a later performance optimisation.
+# - CA1515: public types are needed for WebApplicationFactory and Hot Chocolate type discovery.
+# - CA1716/CA1711: domain names such as "Estimate" and error types are intentional.
+# - CA1812: classes created by dependency injection look unused to the analyzer.
+# - CA2007: ASP.NET Core has no synchronization context, ConfigureAwait adds noise.
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1716.severity = none
+dotnet_diagnostic.CA1711.severity = none
+dotnet_diagnostic.CA1812.severity = none
+dotnet_diagnostic.CA2007.severity = none
+
+# Migrations are generated code.
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_diagnostic.IDE0005.severity = none

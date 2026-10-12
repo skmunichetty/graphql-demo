@@ -1,0 +1,230 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+type Query {
+  "The export of an estimate to a provider, or null if it has never been exported."
+  estimateExport(
+    estimateId: UUID!
+    "Optional. Defaults to MOCK."
+    provider: AccountingProvider
+  ): EstimateExport @authorize(policy: "accounting.read") @cost(weight: "10")
+  "An export by its ID, or null if it does not exist in your tenant."
+  estimateExportById(id: UUID!): EstimateExport
+    @authorize(policy: "accounting.read")
+    @cost(weight: "10")
+  "Exports in your tenant, newest first. Cursor-paginated: at most 50 per page, 20 by default."
+  estimateExports(
+    "Returns the first _n_ elements from the list."
+    first: Int
+    "Returns the elements in the list that come after the specified cursor."
+    after: String
+    "Returns the last _n_ elements from the list."
+    last: Int
+    "Returns the elements in the list that come before the specified cursor."
+    before: String
+  ): EstimateExportsConnection
+    @authorize(policy: "accounting.read")
+    @listSize(
+      assumedSize: 50
+      slicingArguments: ["first", "last"]
+      slicingArgumentDefaultValue: 20
+      sizedFields: ["edges", "nodes"]
+      requireOneSlicingArgument: false
+    )
+    @cost(weight: "10")
+}
+
+type Mutation {
+  "Exports an approved estimate to an accounting provider. Idempotent: repeating the request returns the existing export instead of creating a duplicate. If the provider fails, the export is returned with status FAILED and lastErrorCode set; call this mutation again to retry."
+  exportEstimate(input: ExportEstimateInput!): ExportEstimatePayload!
+    @authorize(policy: "accounting.export")
+    @cost(weight: "10")
+}
+
+"The record of exporting one estimate to one accounting provider."
+type EstimateExport {
+  id: UUID!
+  "The estimate's ID in the Estimates service."
+  estimateId: UUID!
+  provider: AccountingProvider!
+  status: ExportStatus!
+  "The invoice reference in the accounting system. Set when status is SUCCEEDED."
+  externalReference: String
+  currencyCode: String!
+  "The estimate total that was sent."
+  exportedTotal: Decimal!
+  "How many times the export has been attempted."
+  attemptCount: Int!
+  "Why the latest attempt failed, for example ACCOUNTING_PROVIDER_REJECTED. Null unless status is FAILED."
+  lastErrorCode: String
+  lastErrorMessage: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  "When the export succeeded."
+  completedAt: DateTime
+}
+
+"A connection to a list of items."
+type EstimateExportsConnection {
+  "Information to aid in pagination."
+  pageInfo: PageInfo!
+  "A list of edges."
+  edges: [EstimateExportsEdge!]
+  "A flattened list of the nodes."
+  nodes: [EstimateExport!]
+}
+
+"An edge in a connection."
+type EstimateExportsEdge {
+  "A cursor for use in pagination."
+  cursor: String!
+  "The item at the end of the edge."
+  node: EstimateExport!
+}
+
+"Only approved estimates can be exported."
+type EstimateNotApprovedError implements UserError {
+  message: String!
+  code: String!
+  estimateId: UUID!
+  "The estimate's status in the Estimates service, for example DRAFT."
+  currentStatus: String!
+}
+
+"The estimate does not exist in your tenant."
+type EstimateNotFoundError implements UserError {
+  message: String!
+  code: String!
+  estimateId: UUID!
+}
+
+"The Estimates service could not be reached. Nothing was exported; retry later."
+type EstimatesServiceUnavailableError implements UserError {
+  message: String!
+  code: String!
+}
+
+type ExportEstimatePayload {
+  export: EstimateExport
+  errors: [ExportEstimateError!]
+}
+
+"The estimate is being exported by another request. Query estimateExport for its status."
+type ExportInProgressError implements UserError {
+  message: String!
+  code: String!
+}
+
+"Information about pagination in a connection."
+type PageInfo {
+  "Indicates whether more edges exist following the set defined by the clients arguments."
+  hasNextPage: Boolean!
+  "Indicates whether more edges exist prior the set defined by the clients arguments."
+  hasPreviousPage: Boolean!
+  "When paginating backwards, the cursor to continue."
+  startCursor: String
+  "When paginating forwards, the cursor to continue."
+  endCursor: String
+}
+
+"The requested accounting provider is not configured on this server."
+type UnsupportedProviderError implements UserError {
+  message: String!
+  code: String!
+}
+
+"A business rule failure the client can act on."
+interface UserError {
+  "Human-readable description. Do not parse it; it may change."
+  message: String!
+  "Stable machine-readable error code."
+  code: String!
+}
+
+union ExportEstimateError =
+  | EstimateNotFoundError
+  | EstimateNotApprovedError
+  | ExportInProgressError
+  | EstimatesServiceUnavailableError
+  | UnsupportedProviderError
+
+input ExportEstimateInput {
+  estimateId: UUID!
+  "Optional. Defaults to MOCK."
+  provider: AccountingProvider
+}
+
+"Accounting systems. More values (for example XERO, QUICKBOOKS) will be added: handle unknown values."
+enum AccountingProvider {
+  "Demonstration provider. Does not contact a real accounting system."
+  MOCK
+}
+
+"Defines when a policy shall be executed."
+enum ApplyPolicy {
+  "Before the resolver was executed."
+  BEFORE_RESOLVER
+  "After the resolver was executed."
+  AFTER_RESOLVER
+  "The policy is applied in the validation step before the execution."
+  VALIDATION
+}
+
+enum ExportStatus {
+  "Recorded; the provider call is in progress."
+  PENDING
+  "Accepted by the provider. Final."
+  SUCCEEDED
+  "The provider call failed. Call exportEstimate again to retry."
+  FAILED
+}
+
+"The `DateTime` scalar type represents a date and time with time zone offset information."
+scalar DateTime
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/date-time.html")
+
+"The `Decimal` scalar type represents a decimal floating-point number with high precision."
+scalar Decimal
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/decimal.html")
+
+"The `UUID` scalar type represents a Universally Unique Identifier (UUID) as defined by RFC 9562."
+scalar UUID
+  @specifiedBy(url: "https://scalars.graphql.org/chillicream/uuid.html")
+
+"The authorize directive."
+directive @authorize(
+  "The name of the authorization policy that determines access to the annotated resource."
+  policy: String
+  "Roles that are allowed to access the annotated resource."
+  roles: [String!]
+  "Defines when the authorize directive shall be applied. By default the authorize directive is applied before the resolver is executed."
+  apply: ApplyPolicy! = BEFORE_RESOLVER
+) repeatable on OBJECT | FIELD_DEFINITION
+
+"The purpose of the `cost` directive is to define a `weight` for GraphQL types, fields, and arguments. Static analysis can use these weights when calculating the overall cost of a query or response."
+directive @cost(
+  "The `weight` argument defines what value to add to the overall cost for every appearance, or possible appearance, of a type, field, argument, etc."
+  weight: String!
+) on
+  | SCALAR
+  | OBJECT
+  | FIELD_DEFINITION
+  | ARGUMENT_DEFINITION
+  | ENUM
+  | INPUT_FIELD_DEFINITION
+
+"The purpose of the `@listSize` directive is to either inform the static analysis about the size of returned lists (if that information is statically available), or to point the analysis to where to find that information."
+directive @listSize(
+  "The `assumedSize` argument can be used to statically define the maximum length of a list returned by a field."
+  assumedSize: Int
+  "The `slicingArguments` argument can be used to define which of the field's arguments with numeric type are slicing arguments, so that their value determines the size of the list returned by that field. It may specify a list of multiple slicing arguments."
+  slicingArguments: [String!]
+  "The `slicingArgumentDefaultValue` argument can be used to define a default value for a slicing argument, which is used if the argument is not present in a query."
+  slicingArgumentDefaultValue: Int
+  "The `sizedFields` argument can be used to define that the value of the `assumedSize` argument or of a slicing argument does not affect the size of a list returned by a field itself, but that of a list returned by one of its sub-fields."
+  sizedFields: [String!]
+  "The `requireOneSlicingArgument` argument can be used to inform the static analysis that it should expect that exactly one of the defined slicing arguments is present in a query. If that is not the case (i.e., if none or multiple slicing arguments are present), the static analysis may throw an error."
+  requireOneSlicingArgument: Boolean = true
+) on FIELD_DEFINITION

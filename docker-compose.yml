@@ -1,0 +1,111 @@
+# LOCAL DEVELOPMENT STACK. Not a production deployment (see docs/deployment.md).
+#
+# Infrastructure only (then run the APIs with `dotnet run`):
+#   docker compose up -d postgres keycloak
+# Everything, including both APIs built from source:
+#   docker compose up -d --build
+#
+# Host ports avoid common defaults (5432, 8080) that other local projects often use; override them
+# with POSTGRES_HOST_PORT / KEYCLOAK_HOST_PORT in .env (then update appsettings.Development.json).
+#
+# Secrets come from .env (create it with scripts/init-dev-env.ps1 or .sh). Compose refuses to
+# start if they are missing, rather than silently using a default password.
+name: construction-estimation
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/init-dev-env first}
+      ESTIMATES_DB_PASSWORD: ${ESTIMATES_DB_PASSWORD:?Run scripts/init-dev-env first}
+      ACCOUNTING_DB_PASSWORD: ${ACCOUNTING_DB_PASSWORD:?Run scripts/init-dev-env first}
+    ports:
+      - "${POSTGRES_HOST_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    # start-dev: HTTP, relaxed caching, embedded dev database. Production uses `start` with TLS.
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run scripts/init-dev-env first}
+      # Tokens always carry iss=http://localhost:8180/realms/construction, whether they were requested
+      # from the host (localhost) or from a container (keycloak:8080). Containers still reach the
+      # token and key endpoints on the internal hostname thanks to the dynamic backchannel.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_HOST_PORT:-8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Substituted into the realm import (deploy/keycloak/construction-realm.json).
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:?Run scripts/init-dev-env first}
+      ACCOUNTING_SERVICE_CLIENT_SECRET: ${ACCOUNTING_SERVICE_CLIENT_SECRET:?Run scripts/init-dev-env first}
+    ports:
+      - "${KEYCLOAK_HOST_PORT:-8180}:8080"
+    volumes:
+      - ./deploy/keycloak/construction-realm.json:/opt/keycloak/data/import/construction-realm.json:ro
+    healthcheck:
+      # The Keycloak image has no curl; use bash's /dev/tcp against the management port.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  estimates-api:
+    build:
+      context: .
+      dockerfile: src/Estimates/Estimates.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__EstimatesDb: Host=postgres;Database=estimates;Username=estimates_app;Password=${ESTIMATES_DB_PASSWORD}
+      Authentication__Authority: http://localhost:${KEYCLOAK_HOST_PORT:-8180}/realms/construction
+      Authentication__MetadataAddress: http://keycloak:8080/realms/construction/.well-known/openid-configuration
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18889
+    ports:
+      - "5101:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  accounting-api:
+    build:
+      context: .
+      dockerfile: src/Accounting/Accounting.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__AccountingDb: Host=postgres;Database=accounting;Username=accounting_app;Password=${ACCOUNTING_DB_PASSWORD}
+      Authentication__Authority: http://localhost:${KEYCLOAK_HOST_PORT:-8180}/realms/construction
+      Authentication__MetadataAddress: http://keycloak:8080/realms/construction/.well-known/openid-configuration
+      EstimatesService__BaseAddress: http://estimates-api:8080
+      EstimatesService__TokenEndpoint: http://keycloak:8080/realms/construction/protocol/openid-connect/token
+      EstimatesService__ClientSecret: ${ACCOUNTING_SERVICE_CLIENT_SECRET}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://aspire-dashboard:18889
+    ports:
+      - "5102:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      estimates-api:
+        condition: service_started
+
+  # Optional trace/log/metric viewer: http://localhost:18888 (anonymous access, local only).
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2
+    environment:
+      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "18888:18888"
+
+volumes:
+  postgres-data:

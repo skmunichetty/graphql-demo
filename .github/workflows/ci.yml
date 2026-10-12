@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore ConstructionEstimation.slnx
+
+      # Warnings are errors and code style is enforced during build (Directory.Build.props, .editorconfig).
+      - name: Build
+        run: dotnet build ConstructionEstimation.slnx --configuration Release --no-restore
+
+      # Integration tests start PostgreSQL with Testcontainers; the GitHub-hosted Ubuntu runner has Docker.
+      # Schema snapshot tests fail if the GraphQL schema changed without updating schema/*.graphql.
+      - name: Test
+        run: dotnet test --solution ConstructionEstimation.slnx --configuration Release --no-build
+
+  docker-images:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        service:
+          - { name: estimates-api, dockerfile: src/Estimates/Estimates.Api/Dockerfile }
+          - { name: accounting-api, dockerfile: src/Accounting/Accounting.Api/Dockerfile }
+    steps:
+      - uses: actions/checkout@v5
+      # Each service image builds independently. Publishing to a registry is a later milestone.
+      - name: Build ${{ matrix.service.name }} image
+        run: docker build --file ${{ matrix.service.dockerfile }} --tag ${{ matrix.service.name }}:${{ github.sha }} .

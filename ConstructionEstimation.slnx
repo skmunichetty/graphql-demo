@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ServiceDefaults/ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/src/Accounting/">
+    <Project Path="src/Accounting/Accounting.Api/Accounting.Api.csproj" />
+    <Project Path="src/Accounting/Accounting.Application/Accounting.Application.csproj" />
+    <Project Path="src/Accounting/Accounting.Domain/Accounting.Domain.csproj" />
+    <Project Path="src/Accounting/Accounting.Infrastructure/Accounting.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Estimates/">
+    <Project Path="src/Estimates/Estimates.Api/Estimates.Api.csproj" />
+    <Project Path="src/Estimates/Estimates.Application/Estimates.Application.csproj" />
+    <Project Path="src/Estimates/Estimates.Domain/Estimates.Domain.csproj" />
+    <Project Path="src/Estimates/Estimates.Infrastructure/Estimates.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Accounting.IntegrationTests/Accounting.IntegrationTests.csproj" />
+    <Project Path="tests/Accounting.UnitTests/Accounting.UnitTests.csproj" />
+    <Project Path="tests/Estimates.IntegrationTests/Estimates.IntegrationTests.csproj" />
+    <Project Path="tests/Estimates.UnitTests/Estimates.UnitTests.csproj" />
+    <Project Path="tests/TestSupport/TestSupport.csproj" />
+  </Folder>
+</Solution>
