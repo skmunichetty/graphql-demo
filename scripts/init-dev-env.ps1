@@ -50,5 +50,8 @@ $accountingApi = Join-Path $root 'src/Accounting/Accounting.Api'
 dotnet user-secrets set 'ConnectionStrings:EstimatesDb' "Host=localhost;Port=55432;Database=estimates;Username=estimates_app;Password=$($values['ESTIMATES_DB_PASSWORD'])" --project $estimatesApi | Out-Null
 dotnet user-secrets set 'ConnectionStrings:AccountingDb' "Host=localhost;Port=55432;Database=accounting;Username=accounting_app;Password=$($values['ACCOUNTING_DB_PASSWORD'])" --project $accountingApi | Out-Null
 dotnet user-secrets set 'EstimatesService:ClientSecret' $values['ACCOUNTING_SERVICE_CLIENT_SECRET'] --project $accountingApi | Out-Null
-Write-Host 'Stored connection strings and the Accounting client secret as .NET user secrets.'
+foreach ($project in @($estimatesApi, $accountingApi)) {
+    dotnet user-secrets set 'DevelopmentToken:DefaultPassword' $values['DEMO_USER_PASSWORD'] --project $project | Out-Null
+}
+Write-Host 'Stored connection strings, the Accounting client secret and the demo user password as .NET user secrets.'
 Write-Host 'Note: if the PostgreSQL volume already exists with other passwords, run "docker compose down -v" first.'
