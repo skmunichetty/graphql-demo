@@ -17,3 +17,11 @@ coverage*/
 *.key
 secrets*.json
 appsettings.*.local.json
+
+## Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+backend_override.tf
