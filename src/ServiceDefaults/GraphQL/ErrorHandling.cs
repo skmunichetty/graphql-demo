@@ -28,6 +28,17 @@ public sealed class UnexpectedErrorFilter : IErrorFilter
             return error;
         }
 
+        // A GraphQLException is thrown on purpose with a client-safe error (for example an
+        // authorization check inside a subscription stream). Hot Chocolate reports it as a generic
+        // "Unexpected Execution Error", so restore the intended message and code.
+        if (error.Exception is GraphQLException { Errors: [IError intended, ..] } && intended.Code is not null)
+        {
+            return error
+                .WithMessage(intended.Message)
+                .WithCode(intended.Code)
+                .WithException(null);
+        }
+
         string? traceId = Activity.Current?.TraceId.ToString();
         return error
             .WithMessage("An unexpected error occurred. Quote the traceId if you contact support.")

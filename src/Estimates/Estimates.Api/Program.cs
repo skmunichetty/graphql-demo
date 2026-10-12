@@ -64,14 +64,22 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
+app.UseWebSockets();
 
 app.MapHealthEndpoints();
 
 // The GraphQL endpoint requires a valid access token at the HTTP level (401 without one).
 // Field-level [Authorize] policies then check scopes and tenant claims (GraphQL errors).
+// Subscriptions work here too, as Server-Sent Events (Accept: text/event-stream).
 app.MapGraphQLHttp("/graphql")
     .RequireAuthorization()
     .RequireCors(CorsSettings.PolicyName)
+    .RequireRateLimiting(RateLimitingSettings.PolicyName);
+
+// Subscriptions over WebSocket (graphql-transport-ws). Browsers cannot send headers on a WebSocket,
+// so the upgrade itself is anonymous and the token is checked from the connection_init message
+// (WebSocketAuthenticationInterceptor) before any operation runs.
+app.MapGraphQLWebSocket("/graphql/ws")
     .RequireRateLimiting(RateLimitingSettings.PolicyName);
 
 if (graphQLSettings.EnableDeveloperTools)

@@ -69,6 +69,30 @@ public sealed class LineItemType : ObjectType<LineItemReadModel>
     }
 }
 
+public sealed class EstimateChangeType : ObjectType<EstimateChangedEvent>
+{
+    protected override void Configure(IObjectTypeDescriptor<EstimateChangedEvent> descriptor)
+    {
+        descriptor.Name("EstimateChange");
+        descriptor.Description("A saved change to an estimate.");
+        descriptor.BindFieldsExplicitly();
+
+        descriptor.Field(change => change.Kind);
+        descriptor.Field(change => change.Estimate)
+            .Description("The estimate after the change.")
+            .Type<NonNullType<EstimateType>>();
+    }
+}
+
+public sealed class EstimateChangeKindType : EnumType<EstimateChangeKind>
+{
+    protected override void Configure(IEnumTypeDescriptor<EstimateChangeKind> descriptor)
+    {
+        descriptor.Name("EstimateChangeKind");
+        descriptor.Description("What changed. More values may be added: clients should handle unknown values.");
+    }
+}
+
 public sealed class EstimateStatusType : EnumType<EstimateStatus>
 {
     protected override void Configure(IEnumTypeDescriptor<EstimateStatus> descriptor)

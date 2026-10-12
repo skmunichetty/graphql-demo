@@ -3,6 +3,7 @@ using Estimates.Api.GraphQL.Errors;
 using Estimates.Api.Security;
 using Estimates.Application;
 using HotChocolate.Authorization;
+using HotChocolate.Subscriptions;
 using ServiceDefaults.Security;
 
 namespace Estimates.Api.GraphQL;
@@ -12,6 +13,7 @@ namespace Estimates.Api.GraphQL;
 ///   fieldName(input: FieldNameInput!): FieldNamePayload!
 /// where the payload has the result ("estimate") and a typed "errors" list for the listed exceptions.
 /// Every change to an existing estimate requires expectedVersion (optimistic concurrency).
+/// Each successful change is published to the estimateChanged subscription.
 /// </summary>
 public sealed class Mutation
 {
@@ -27,11 +29,14 @@ public sealed class Mutation
         ClaimsPrincipal user,
         [Service] TenantClaimReader tenantClaimReader,
         [Service] EstimateService estimateService,
+        [Service] ITopicEventSender eventSender,
         CancellationToken cancellationToken)
     {
         string tenantId = tenantClaimReader.GetRequiredTenantId(user);
         var command = new CreateEstimateCommand(customerName, customerEmail, customerPhone, currencyCode);
-        return await estimateService.CreateDraftAsync(tenantId, command, cancellationToken);
+        EstimateReadModel estimate = await estimateService.CreateDraftAsync(tenantId, command, cancellationToken);
+        await eventSender.PublishAsync(EstimateChangeKind.Created, estimate);
+        return estimate;
     }
 
     [Authorize(Policy = Policies.EstimatesWrite)]
@@ -51,11 +56,14 @@ public sealed class Mutation
         ClaimsPrincipal user,
         [Service] TenantClaimReader tenantClaimReader,
         [Service] EstimateService estimateService,
+        [Service] ITopicEventSender eventSender,
         CancellationToken cancellationToken)
     {
         string tenantId = tenantClaimReader.GetRequiredTenantId(user);
         var command = new AddLineItemCommand(estimateId, expectedVersion, description, quantity, unitPrice, taxRatePercent);
-        return await estimateService.AddLineItemAsync(tenantId, command, cancellationToken);
+        EstimateReadModel estimate = await estimateService.AddLineItemAsync(tenantId, command, cancellationToken);
+        await eventSender.PublishAsync(EstimateChangeKind.LineItemAdded, estimate);
+        return estimate;
     }
 
     [Authorize(Policy = Policies.EstimatesWrite)]
@@ -77,11 +85,14 @@ public sealed class Mutation
         ClaimsPrincipal user,
         [Service] TenantClaimReader tenantClaimReader,
         [Service] EstimateService estimateService,
+        [Service] ITopicEventSender eventSender,
         CancellationToken cancellationToken)
     {
         string tenantId = tenantClaimReader.GetRequiredTenantId(user);
         var command = new UpdateLineItemCommand(estimateId, lineItemId, expectedVersion, description, quantity, unitPrice, taxRatePercent);
-        return await estimateService.UpdateLineItemAsync(tenantId, command, cancellationToken);
+        EstimateReadModel estimate = await estimateService.UpdateLineItemAsync(tenantId, command, cancellationToken);
+        await eventSender.PublishAsync(EstimateChangeKind.LineItemUpdated, estimate);
+        return estimate;
     }
 
     [Authorize(Policy = Policies.EstimatesWrite)]
@@ -98,11 +109,14 @@ public sealed class Mutation
         ClaimsPrincipal user,
         [Service] TenantClaimReader tenantClaimReader,
         [Service] EstimateService estimateService,
+        [Service] ITopicEventSender eventSender,
         CancellationToken cancellationToken)
     {
         string tenantId = tenantClaimReader.GetRequiredTenantId(user);
         var command = new RemoveLineItemCommand(estimateId, lineItemId, expectedVersion);
-        return await estimateService.RemoveLineItemAsync(tenantId, command, cancellationToken);
+        EstimateReadModel estimate = await estimateService.RemoveLineItemAsync(tenantId, command, cancellationToken);
+        await eventSender.PublishAsync(EstimateChangeKind.LineItemRemoved, estimate);
+        return estimate;
     }
 
     [Authorize(Policy = Policies.EstimatesWrite)]
@@ -117,10 +131,13 @@ public sealed class Mutation
         ClaimsPrincipal user,
         [Service] TenantClaimReader tenantClaimReader,
         [Service] EstimateService estimateService,
+        [Service] ITopicEventSender eventSender,
         CancellationToken cancellationToken)
     {
         string tenantId = tenantClaimReader.GetRequiredTenantId(user);
         var command = new ApproveEstimateCommand(estimateId, expectedVersion);
-        return await estimateService.ApproveAsync(tenantId, command, cancellationToken);
+        EstimateReadModel estimate = await estimateService.ApproveAsync(tenantId, command, cancellationToken);
+        await eventSender.PublishAsync(EstimateChangeKind.Approved, estimate);
+        return estimate;
     }
 }

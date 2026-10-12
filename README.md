@@ -125,7 +125,8 @@ the mock provider, and queries the export status. Along the way it checks the ne
 
 | What | URL | Notes |
 |---|---|---|
-| Estimates GraphQL | `http://localhost:5101/graphql` | POST only, bearer token required |
+| Estimates GraphQL | `http://localhost:5101/graphql` | POST only, bearer token required. Subscriptions via SSE (`Accept: text/event-stream`) |
+| Estimates subscriptions (WebSocket) | `ws://localhost:5101/graphql/ws` | `graphql-transport-ws`; token in the `connection_init` payload |
 | Accounting GraphQL | `http://localhost:5102/graphql` | POST only, bearer token required |
 | Nitro GraphQL IDE | `http://localhost:5101/graphql/ui`, `http://localhost:5102/graphql/ui` | Development only; add an `Authorization` header in the IDE |
 | Schema (SDL) | `/graphql/schema.graphql` on each service | Development only; checked-in copies in [`schema/`](schema) |
@@ -149,6 +150,44 @@ failure: `./scripts/get-token.ps1 -User alice -Scopes 'estimates:read'`.
 
 The [client integration guide](docs/client-integration-guide.md) has copyable operations, curl
 examples, real responses, error handling and pagination.
+
+## Subscriptions
+
+`estimateChanged` streams every saved change to estimates in **your tenant**: `CREATED`,
+`LINE_ITEM_ADDED`, `LINE_ITEM_UPDATED`, `LINE_ITEM_REMOVED` and `APPROVED`, each with the estimate as
+it is now. Pass `estimateId` to follow a single estimate. It needs the `estimates:read` scope.
+
+```graphql
+subscription { estimateChanged { kind estimate { id status version total lineItems { description total } } } }
+```
+
+**Server-Sent Events** on `/graphql`, with the usual `Authorization` header. Keep this running, then
+change an estimate from another terminal:
+
+```bash
+curl -N -X POST http://localhost:5101/graphql -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "Accept: text/event-stream" -d '{"query":"subscription { estimateChanged { kind estimate { id status total } } }"}'
+```
+
+Each change arrives as `event: next` with a `data:` line holding a normal GraphQL result.
+
+**WebSocket** on `ws://localhost:5101/graphql/ws` (`graphql-transport-ws` protocol). Browsers can't
+send headers on a WebSocket, so send the token in the first message:
+
+```json
+{ "type": "connection_init", "payload": { "Authorization": "Bearer <token>" } }
+```
+
+The server replies `connection_ack`, or closes with code 4403 if the token is missing or invalid.
+In Postman, choose **GraphQL**, use the `ws://` URL, and put the `Authorization` value in the
+connection payload. In the Nitro IDE, set the subscription URL to `ws://localhost:5101/graphql/ws`
+in the connection settings.
+
+Notes:
+- Events are kept in memory, so subscribers only see changes made through the **same API
+  instance**. Running several replicas needs a shared provider (Redis, or PostgreSQL
+  `LISTEN/NOTIFY` via `HotChocolate.Subscriptions.Postgres`).
+- The token is checked when the subscription starts. An open stream keeps running after the token
+  expires, so clients should reconnect with a fresh token.
 
 ## Running the tests
 
