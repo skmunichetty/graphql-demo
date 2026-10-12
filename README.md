@@ -130,10 +130,29 @@ the mock provider, and queries the export status. Along the way it checks the ne
 | Nitro GraphQL IDE | `http://localhost:5101/graphql/ui`, `http://localhost:5102/graphql/ui` | Development only; add an `Authorization` header in the IDE |
 | Schema (SDL) | `/graphql/schema.graphql` on each service | Development only; checked-in copies in [`schema/`](schema) |
 | Health | `/health/live`, `/health/ready` | Anonymous |
+| Development token | `POST /dev/token` on each service | Development only; see below |
 | Keycloak | `http://localhost:8180` (admin console user `admin`, password in `.env`) | Realm `construction` |
 | Aspire dashboard (traces, logs, metrics) | `http://localhost:18888` | Docker mode only |
 
 ## Getting a development token
+
+In the Development environment, both APIs expose `POST /dev/token`. It forwards a password grant to
+the local Keycloak and returns an access token. `password` and `scope` are optional: the demo user
+password and all scopes are used by default.
+
+```bash
+curl -X POST http://localhost:5101/dev/token -H "Content-Type: application/json" -d '{"username":"alice"}'
+```
+
+```powershell
+$token = (Invoke-RestMethod -Method Post -Uri http://localhost:5101/dev/token -ContentType 'application/json' -Body '{"username":"alice"}').accessToken
+```
+
+The response has `accessToken`, `tokenType`, `expiresIn` (300 seconds) and `scope`. Add
+`"scope":"estimates:read"` to get a token with fewer permissions. The endpoint is disabled in
+`appsettings.json`, and the service refuses to start if it's enabled outside Development.
+
+The scripts do the same from a terminal:
 
 ```powershell
 $token = ./scripts/get-token.ps1 -User alice

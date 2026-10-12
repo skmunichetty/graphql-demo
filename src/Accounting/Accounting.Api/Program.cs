@@ -16,6 +16,7 @@ GraphQLSettings graphQLSettings = builder.Configuration.GetValidatedSettings<Gra
 CorsSettings corsSettings = builder.Configuration.GetValidatedSettings<CorsSettings>(CorsSettings.SectionName);
 RateLimitingSettings rateLimitingSettings = builder.Configuration.GetValidatedSettings<RateLimitingSettings>(RateLimitingSettings.SectionName);
 HostingSettings hostingSettings = builder.Configuration.GetValidatedSettings<HostingSettings>(HostingSettings.SectionName);
+DevelopmentTokenSettings developmentTokenSettings = builder.Configuration.GetValidatedSettings<DevelopmentTokenSettings>(DevelopmentTokenSettings.SectionName);
 string connectionString = builder.Configuration.GetRequiredConnectionString("AccountingDb");
 
 builder.WebHost.ConfigureKestrel(kestrel =>
@@ -55,6 +56,7 @@ builder.Services.AddAccountingGraphQL(graphQLSettings);
 
 builder.Services.AddApiCors(corsSettings);
 builder.Services.AddPerClientRateLimiting(rateLimitingSettings);
+builder.Services.AddDevelopmentTokenEndpoint(developmentTokenSettings, builder.Environment);
 
 // Readiness checks only this service's own database. The Estimates service being down does not
 // make this service "not ready": status queries still work, and exports report a clear error.
@@ -84,6 +86,9 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapHealthEndpoints();
+
+// Development only (refuses to start otherwise): POST /dev/token returns a demo access token.
+app.MapDevelopmentTokenEndpoint(developmentTokenSettings);
 
 app.MapGraphQLHttp("/graphql")
     .RequireAuthorization()

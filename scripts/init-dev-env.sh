@@ -41,5 +41,8 @@ dotnet user-secrets set "ConnectionStrings:AccountingDb" \
   --project "$root/src/Accounting/Accounting.Api" > /dev/null
 dotnet user-secrets set "EstimatesService:ClientSecret" "${values[ACCOUNTING_SERVICE_CLIENT_SECRET]}" \
   --project "$root/src/Accounting/Accounting.Api" > /dev/null
-echo "Stored connection strings and the Accounting client secret as .NET user secrets."
+for project in Estimates/Estimates.Api Accounting/Accounting.Api; do
+  dotnet user-secrets set "DevelopmentToken:DefaultPassword" "${values[DEMO_USER_PASSWORD]}" \n    --project "$root/src/$project" > /dev/null
+done
+echo "Stored connection strings, the Accounting client secret and the demo user password as .NET user secrets."
 echo "Note: if the PostgreSQL volume already exists with other passwords, run 'docker compose down -v' first."

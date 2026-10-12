@@ -14,6 +14,7 @@ GraphQLSettings graphQLSettings = builder.Configuration.GetValidatedSettings<Gra
 CorsSettings corsSettings = builder.Configuration.GetValidatedSettings<CorsSettings>(CorsSettings.SectionName);
 RateLimitingSettings rateLimitingSettings = builder.Configuration.GetValidatedSettings<RateLimitingSettings>(RateLimitingSettings.SectionName);
 HostingSettings hostingSettings = builder.Configuration.GetValidatedSettings<HostingSettings>(HostingSettings.SectionName);
+DevelopmentTokenSettings developmentTokenSettings = builder.Configuration.GetValidatedSettings<DevelopmentTokenSettings>(DevelopmentTokenSettings.SectionName);
 string connectionString = builder.Configuration.GetRequiredConnectionString("EstimatesDb");
 
 // GraphQL requests are small JSON documents; there are no file uploads.
@@ -40,6 +41,7 @@ builder.Services.AddEstimatesGraphQL(graphQLSettings);
 
 builder.Services.AddApiCors(corsSettings);
 builder.Services.AddPerClientRateLimiting(rateLimitingSettings);
+builder.Services.AddDevelopmentTokenEndpoint(developmentTokenSettings, builder.Environment);
 builder.Services.AddHealthChecks().AddDbContextCheck<EstimatesDbContext>("database", tags: ["ready"]);
 
 // ---- HTTP pipeline ----
@@ -66,6 +68,9 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapHealthEndpoints();
+
+// Development only (refuses to start otherwise): POST /dev/token returns a demo access token.
+app.MapDevelopmentTokenEndpoint(developmentTokenSettings);
 
 // The GraphQL endpoint requires a valid access token at the HTTP level (401 without one).
 // Field-level [Authorize] policies then check scopes and tenant claims (GraphQL errors).

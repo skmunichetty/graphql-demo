@@ -64,6 +64,8 @@ services:
       dockerfile: src/Estimates/Estimates.Api/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      DevelopmentToken__TokenEndpoint: http://keycloak:8080/realms/construction/protocol/openid-connect/token
+      DevelopmentToken__DefaultPassword: ${DEMO_USER_PASSWORD}
       ConnectionStrings__EstimatesDb: Host=postgres;Database=estimates;Username=estimates_app;Password=${ESTIMATES_DB_PASSWORD}
       Authentication__Authority: http://localhost:${KEYCLOAK_HOST_PORT:-8180}/realms/construction
       Authentication__MetadataAddress: http://keycloak:8080/realms/construction/.well-known/openid-configuration
@@ -82,6 +84,8 @@ services:
       dockerfile: src/Accounting/Accounting.Api/Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      DevelopmentToken__TokenEndpoint: http://keycloak:8080/realms/construction/protocol/openid-connect/token
+      DevelopmentToken__DefaultPassword: ${DEMO_USER_PASSWORD}
       ConnectionStrings__AccountingDb: Host=postgres;Database=accounting;Username=accounting_app;Password=${ACCOUNTING_DB_PASSWORD}
       Authentication__Authority: http://localhost:${KEYCLOAK_HOST_PORT:-8180}/realms/construction
       Authentication__MetadataAddress: http://keycloak:8080/realms/construction/.well-known/openid-configuration
