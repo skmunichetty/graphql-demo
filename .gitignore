@@ -17,3 +17,18 @@ coverage*/
 *.key
 secrets*.json
 appsettings.*.local.json
+
+## Terraform: never commit state, plans, local variables or credentials.
+## .terraform.lock.hcl IS committed (it pins provider versions and checksums).
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+*.tfvars
+!*.tfvars.example
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc

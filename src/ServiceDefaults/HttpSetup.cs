@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace ServiceDefaults;
 
@@ -53,6 +54,45 @@ public static class HttpSetup
                 });
             });
         });
+    }
+
+    public const string HealthPathPrefix = "/health";
+
+    /// <summary>
+    /// Caps how long readiness checks may run. Without a cap, an unreachable database makes
+    /// /health/ready take ~20 s (EF Core keeps retrying the connection), longer than a load
+    /// balancer's health-check timeout, so slow checks pile up. A capped check reports 503 quickly.
+    /// Call after the checks are registered.
+    /// </summary>
+    public static IServiceCollection AddReadinessCheckTimeout(this IServiceCollection services, TimeSpan timeout)
+    {
+        return services.Configure<HealthCheckServiceOptions>(options =>
+        {
+            foreach (HealthCheckRegistration registration in options.Registrations.Where(check => check.Tags.Contains("ready")))
+            {
+                registration.Timeout = timeout;
+            }
+        });
+    }
+
+    /// <summary>
+    /// HSTS plus HTTP-to-HTTPS redirection for client traffic, with health endpoints exempt.
+    ///
+    /// Behind a TLS-terminating load balancer (for example an AWS ALB), health checks reach the
+    /// container over plain HTTP inside the network and never carry X-Forwarded-Proto. Redirecting
+    /// them would make every target look unhealthy. Health responses contain no data and need no
+    /// token, so serving them over HTTP is safe; every other path still redirects to HTTPS.
+    ///
+    /// The redirect only happens when the public HTTPS port is known (ASPNETCORE_HTTPS_PORT or the
+    /// "https_port" setting). Without it ASP.NET Core logs a warning and does NOT redirect.
+    /// </summary>
+    public static IApplicationBuilder UseHttpsEnforcement(this IApplicationBuilder app)
+    {
+        app.UseHsts();
+        app.UseWhen(
+            context => !context.Request.Path.StartsWithSegments(HealthPathPrefix),
+            branch => branch.UseHttpsRedirection());
+        return app;
     }
 
     /// <summary>

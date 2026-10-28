@@ -1,0 +1,39 @@
+name: Dev cost report
+
+# Emails a daily usage report (through the SNS topic created by infra/bootstrap) at 21:00 UTC,
+# which is 08:00 Sydney summer time / 07:00 winter. Run it manually at any time.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 21 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_OPS_ROLE_ARN }}
+          role-session-name: cost-report-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true # public repository: keep the account ID out of public logs
+
+      - name: Send report
+        env:
+          PROJECT: graphql-demo
+          TOPIC_ARN: ${{ vars.ALERTS_TOPIC_ARN }}
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+          DB_IDENTIFIER: ${{ vars.DB_INSTANCE_ID }}
+          BUDGET_NAME: graphql-demo-monthly
+        run: bash infra/scripts/cost-report.sh

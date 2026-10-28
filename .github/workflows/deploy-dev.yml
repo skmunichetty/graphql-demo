@@ -1,0 +1,241 @@
+name: Deploy dev
+
+# Deploys the Estimates API to ECS Fargate (dev). Order, every time:
+#   tests -> build and push image (immutable SHA tag, deploy by digest)
+#   -> phase 1: terraform apply (infrastructure + migration task definition; API keeps its current image)
+#   -> one-off migration task (must exit 0)
+#   -> phase 2: terraform apply (API task definition with the new image)
+#   -> wait for ECS stability, verify the rollout and the public health check.
+#
+# Rollback: run this workflow manually with image_digest set to an earlier digest (see the guide).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "Deploy an EXISTING image digest (sha256:...) instead of building, e.g. to roll back. Leave empty to build this commit."
+        required: false
+        default: ""
+
+# One dev deployment (or stop/start) at a time; never cancel a run halfway through Terraform.
+concurrency:
+  group: dev-environment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    # A rollback redeploys an image that was already tested.
+    if: inputs.image_digest == ''
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    if: always() && (needs.ci.result == 'success' || needs.ci.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: dev
+      url: ${{ steps.verify.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write # lets this job request a GitHub OIDC token to assume the AWS role
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_domain_name: ${{ vars.DEV_DOMAIN }}
+      TF_VAR_route53_zone_name: ${{ vars.ROUTE53_ZONE }}
+      TF_VAR_oidc_authority: ${{ vars.OIDC_AUTHORITY }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure AWS credentials (OIDC, no stored keys)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-dev-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true # public repository: keep the account ID out of public logs
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+
+      # ---------------- Image ----------------
+      - name: Log in to Amazon ECR
+        if: inputs.image_digest == ''
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        if: inputs.image_digest == ''
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push image (tag = commit SHA, immutable)
+        if: inputs.image_digest == ''
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: src/Estimates/Estimates.Api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          # A plain single-platform image manifest: one digest, nothing else for ECS or ECR to interpret.
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Select image digest
+        id: image
+        env:
+          REQUESTED_DIGEST: ${{ inputs.image_digest }}
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          digest="${REQUESTED_DIGEST:-$BUILT_DIGEST}"
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Not an image digest: '$digest'"; exit 1
+          fi
+          # Never deploy an image that is not in ECR (important for rollbacks).
+          aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageDigest=$digest" \
+            --query 'imageDetails[0].{tags: imageTags, pushedAt: imagePushedAt}' --output json
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      # ---------------- Terraform ----------------
+      - name: Terraform init
+        run: terraform -chdir=infra/dev init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Read the current deployment
+        id: current
+        run: |
+          # Empty on the very first deployment (no state yet).
+          current=$(terraform -chdir=infra/dev output -raw api_image_digest 2>/dev/null || true)
+          [[ "$current" =~ ^sha256:[a-f0-9]{64}$ ]] || current=""
+          db=$(terraform -chdir=infra/dev output -raw db_instance_identifier 2>/dev/null || true)
+          echo "api_digest=$current" >> "$GITHUB_OUTPUT"
+          echo "db_identifier=$db" >> "$GITHUB_OUTPUT"
+          echo "Currently deployed API image: ${current:-none (first deployment)}"
+
+      - name: Make sure the database is running
+        if: steps.current.outputs.db_identifier != ''
+        env:
+          DB: ${{ steps.current.outputs.db_identifier }}
+        run: |
+          status=$(aws rds describe-db-instances --db-instance-identifier "$DB" --query 'DBInstances[0].DBInstanceStatus' --output text)
+          echo "Database status: $status"
+          if [[ "$status" == "stopped" ]]; then
+            aws rds start-db-instance --db-instance-identifier "$DB" > /dev/null
+          fi
+          if [[ "$status" != "available" ]]; then
+            echo "Waiting for the database to become available (a cold start takes a few minutes)..."
+            aws rds wait db-instance-available --db-instance-identifier "$DB"
+          fi
+
+      - name: "Phase 1: plan infrastructure + migration task (API keeps its current image)"
+        env:
+          TF_VAR_migration_image_digest: ${{ steps.image.outputs.digest }}
+          # First deployment: the service is created with 0 tasks, so the new image is safe here.
+          TF_VAR_api_image_digest: ${{ steps.current.outputs.api_digest || steps.image.outputs.digest }}
+        run: terraform -chdir=infra/dev plan -out=phase1.tfplan
+
+      - name: "Phase 1: apply"
+        run: terraform -chdir=infra/dev apply phase1.tfplan
+
+      - name: Read deployment targets
+        id: tf
+        run: |
+          out() { terraform -chdir=infra/dev output -raw "$1"; }
+          {
+            echo "cluster=$(out cluster_name)"
+            echo "service=$(out service_name)"
+            echo "migration_task_definition=$(out migration_task_definition_arn)"
+            echo "subnets=$(terraform -chdir=infra/dev output -json task_subnet_ids | jq -r 'join(",")')"
+            echo "security_group=$(out task_security_group_id)"
+            echo "log_group=$(out log_group_name)"
+            echo "db_identifier=$(out db_instance_identifier)"
+            echo "api_url=$(out api_url)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Make sure the new database is available
+        env:
+          DB: ${{ steps.tf.outputs.db_identifier }}
+        run: aws rds wait db-instance-available --db-instance-identifier "$DB"
+
+      - name: Run database migrations (one-off ECS task)
+        env:
+          CLUSTER: ${{ steps.tf.outputs.cluster }}
+          TASK_DEFINITION: ${{ steps.tf.outputs.migration_task_definition }}
+          SUBNETS: ${{ steps.tf.outputs.subnets }}
+          SECURITY_GROUP: ${{ steps.tf.outputs.security_group }}
+          LOG_GROUP: ${{ steps.tf.outputs.log_group }}
+        run: bash infra/scripts/run-migration.sh
+
+      - name: "Phase 2: plan the API rollout"
+        env:
+          TF_VAR_migration_image_digest: ${{ steps.image.outputs.digest }}
+          TF_VAR_api_image_digest: ${{ steps.image.outputs.digest }}
+        run: terraform -chdir=infra/dev plan -out=phase2.tfplan
+
+      - name: "Phase 2: apply"
+        run: terraform -chdir=infra/dev apply phase2.tfplan
+
+      # ---------------- Rollout ----------------
+      - name: Start the service and wait for the rollout
+        env:
+          CLUSTER: ${{ steps.tf.outputs.cluster }}
+          SERVICE: ${{ steps.tf.outputs.service }}
+        run: |
+          export EXPECTED_TASK_DEFINITION=$(terraform -chdir=infra/dev output -raw api_task_definition_arn)
+          desired=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].desiredCount' --output text)
+          if [[ "$desired" == "0" ]]; then
+            echo "Service has 0 tasks (first deployment or stopped); starting 1."
+            aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --desired-count 1 > /dev/null
+          fi
+          bash infra/scripts/wait-for-rollout.sh
+
+      - name: Verify through the load balancer
+        id: verify
+        env:
+          API_URL: ${{ steps.tf.outputs.api_url }}
+        run: |
+          echo "url=$API_URL" >> "$GITHUB_OUTPUT"
+          # New DNS records can take a minute to resolve on the runner.
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/health/ready" || true)
+            [[ "$code" == "200" ]] && break
+            echo "Attempt $attempt: /health/ready returned ${code:-no response}; retrying in 15 s"; sleep 15
+          done
+          [[ "$code" == "200" ]] || { echo "::error::$API_URL/health/ready did not return 200"; exit 1; }
+
+          http=$(curl -s -o /dev/null -w '%{http_code}' "${API_URL/https:/http:}/health/live")
+          graphql=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"query":"{ __typename }"}' "$API_URL/graphql")
+          echo "https /health/ready -> 200, http /health/live -> $http (expect 301), POST /graphql without token -> $graphql (expect 401)"
+          [[ "$http" == "301" && "$graphql" == "401" ]] || { echo "::error::Unexpected HTTP redirect or authentication behaviour"; exit 1; }
+
+      - name: Summary
+        if: always()
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+          PREVIOUS: ${{ steps.current.outputs.api_digest }}
+          URL: ${{ steps.tf.outputs.api_url }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "### Dev deployment: $OUTCOME"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Deployed digest | \`${DIGEST:-none}\` |"
+            echo "| Previous digest (rollback target) | \`${PREVIOUS:-none}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| URL | ${URL:-n/a} |"
+          } >> "$GITHUB_STEP_SUMMARY"

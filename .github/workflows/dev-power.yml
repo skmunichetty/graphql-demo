@@ -1,0 +1,53 @@
+name: Dev stop/start
+
+# Saves money by stopping the dev environment when it is not needed.
+# - Manual: Actions -> "Dev stop/start" -> Run workflow -> choose stop or start.
+# - Scheduled: every night at 10:00 UTC (21:00 Sydney summer time / 20:00 winter) it STOPS dev.
+#   Starting is always manual (or happens automatically with the next deployment).
+# Scheduled workflows only run from the default branch (main), and GitHub disables schedules in
+# repositories with no activity for 60 days.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "stop or start the dev environment"
+        type: choice
+        options: [stop, start]
+        default: stop
+  schedule:
+    - cron: "0 10 * * *"
+
+# Shares the group with deployments so a stop never runs in the middle of a deploy.
+concurrency:
+  group: dev-environment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  power:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_OPS_ROLE_ARN }}
+          role-session-name: dev-power-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true # public repository: keep the account ID out of public logs
+
+      - name: ${{ inputs.action || 'stop' }} dev
+        env:
+          ACTION: ${{ inputs.action || 'stop' }}
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+          DB_IDENTIFIER: ${{ vars.DB_INSTANCE_ID }}
+          API_URL: https://${{ vars.DEV_DOMAIN }}
+        run: bash infra/scripts/dev-power.sh
