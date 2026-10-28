@@ -3,9 +3,14 @@ using Estimates.Api.Security;
 using Estimates.Application;
 using Estimates.Infrastructure;
 using Estimates.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
 using ServiceDefaults;
 using ServiceDefaults.Security;
+
+// Container health check mode: probe the running server and exit, without starting a second one.
+if (HealthProbe.IsRequested(args))
+{
+    return await HealthProbe.RunAsync();
+}
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -41,23 +46,33 @@ builder.Services.AddEstimatesGraphQL(graphQLSettings);
 builder.Services.AddApiCors(corsSettings);
 builder.Services.AddPerClientRateLimiting(rateLimitingSettings);
 builder.Services.AddHealthChecks().AddDbContextCheck<EstimatesDbContext>("database", tags: ["ready"]);
+builder.Services.AddReadinessCheckTimeout(TimeSpan.FromSeconds(3));
 
 // ---- HTTP pipeline ----
 WebApplication app = builder.Build();
 
+// Deployment step mode: apply migrations and exit with 0 (success) or 1 (failure), without
+// starting the web server. Deployments run this once, before rolling out new API tasks.
+if (DatabaseMigrator.IsRequested(args))
+{
+    return await DatabaseMigrator.MigrateAsync(app.Services, CancellationToken.None);
+}
+
+// Local development convenience only; deployed environments use --migrate-database instead.
 if (hostingSettings.ApplyMigrationsOnStartup)
 {
-    await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
-    EstimatesDbContext dbContext = scope.ServiceProvider.GetRequiredService<EstimatesDbContext>();
-    await dbContext.Database.MigrateAsync();
+    int migrationExitCode = await DatabaseMigrator.MigrateAsync(app.Services, CancellationToken.None);
+    if (migrationExitCode != 0)
+    {
+        return migrationExitCode;
+    }
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 
 if (hostingSettings.EnforceHttps)
 {
-    app.UseHsts();
-    app.UseHttpsRedirection();
+    app.UseHttpsEnforcement();
 }
 
 app.UseCors();
@@ -86,6 +101,7 @@ if (graphQLSettings.EnableDeveloperTools)
 }
 
 await app.RunAsync();
+return 0;
 
 /// <summary>Exposed so integration tests can start the application with WebApplicationFactory.</summary>
 public partial class Program

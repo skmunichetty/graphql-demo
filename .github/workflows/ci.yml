@@ -1,9 +1,13 @@
 name: CI
 
+# Pull requests run this directly. The dev deployment workflow calls it (workflow_call) before
+# deploying, so main is tested exactly once per push.
+#
+# No job here can obtain AWS credentials: there is no id-token permission, and the AWS roles only
+# trust the "dev" GitHub environment, which only the main branch may use.
 on:
-  push:
-    branches: [ main ]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -13,9 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -41,7 +45,32 @@ jobs:
           - { name: estimates-api, dockerfile: src/Estimates/Estimates.Api/Dockerfile }
           - { name: accounting-api, dockerfile: src/Accounting/Accounting.Api/Dockerfile }
     steps:
-      - uses: actions/checkout@v5
-      # Each service image builds independently. Publishing to a registry is a later milestone.
+      - uses: actions/checkout@v7
+      # Each service image builds independently. Only the deploy workflow pushes images.
       - name: Build ${{ matrix.service.name }} image
         run: docker build --file ${{ matrix.service.dockerfile }} --tag ${{ matrix.service.name }}:${{ github.sha }} .
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.9
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform fmt -check -recursive -diff infra
+
+      # -backend=false: validation needs no state and no AWS credentials.
+      - name: Validate bootstrap
+        run: |
+          terraform -chdir=infra/bootstrap init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/bootstrap validate
+
+      - name: Validate dev
+        run: |
+          terraform -chdir=infra/dev init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/dev validate

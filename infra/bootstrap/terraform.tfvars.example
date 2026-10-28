@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (gitignored: this repository is public) and fill in.
+alert_email = "you@example.com"
+
+# Optional overrides
+# monthly_budget_usd = 75
+# route53_zone_name  = "amapi.click"

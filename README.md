@@ -203,4 +203,5 @@ docs/               Architecture, client guide, security, pricing, schema evolut
 - [Pricing, tax and rounding rules](docs/pricing-rules.md)
 - [Schema evolution and deprecation](docs/schema-evolution.md)
 - [Deployment guidance and remaining production work](docs/deployment.md)
+- [Practical: deploy the Estimates API to AWS ECS Fargate (Terraform + GitHub Actions)](docs/ecs-fargate-practical.md)
 - [Roadmap: later milestones](docs/roadmap.md)

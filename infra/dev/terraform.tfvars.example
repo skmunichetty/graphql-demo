@@ -1,0 +1,11 @@
+# For running infra/dev locally. Copy to terraform.tfvars (gitignored). The deployment workflow
+# passes the same values from GitHub environment variables instead.
+domain_name       = "estimates-dev.example.com"
+route53_zone_name = "example.com"
+
+# Must be a public HTTPS OIDC issuer and equal the token's "iss" claim exactly.
+oidc_authority = "https://your-tenant.example.auth0.com/"
+
+# Set by the workflow from the image it pushed (sha256:<64 hex>).
+api_image_digest       = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+migration_image_digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
